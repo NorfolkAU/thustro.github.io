@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Active Alerts</title>
+
+<style>
+body {
+    font-family: BlockBlueprint;
+    background: #000;
+    padding: 15px;
+    color: white;
+}
+
+h2 { margin-bottom: 10px; }
+
+button {
+    margin-bottom: 6px;
+    padding: 6px 12px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* Outline Levels */
+.outline-huge {
+    font-size: 1.6em;
+    text-shadow:-4px -4px 0 #000,4px -4px 0 #000,-4px 4px 0 #000,4px 4px 0 #000;
+}
+.outline-large {
+    font-size: 1.35em;
+    text-shadow:-3px -3px 0 #000,3px -3px 0 #000,-3px 3px 0 #000,3px 3px 0 #000;
+}
+.outline-medium {
+    font-size: 1.15em;
+    text-shadow:-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000;
+}
+.outline-normal {
+    text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;
+}
+
+:root {
+    --TORE:#ffffff;
+    --TORP:#ff69b4;
+    --TORR:#8b0000;
+    --TOR:#ff0000;
+
+    --SVRD:#ff00ff;
+    --SVRC:#ffcc00;
+    --SVR:#ffff00;
+
+    --FFWE:#00ff00;
+    --FFWC:#00cc66;
+    --FFW:#0099ff;
+
+    --SMW:#008080;
+    --SQW:#89cff0;
+}
+
+.alert-line{
+font-weight:bold;
+padding:4px 0;
+}
+
+/* POPUP */
+
+#popupAlert{
+position:fixed;
+bottom:40px;
+left:50%;
+transform:translateX(-50%);
+background:#111;
+padding:18px 28px;
+border-radius:8px;
+
+border:3px solid white;   /* crop guide */
+
+text-align:center;
+opacity:0;
+pointer-events:none;
+transition:opacity 1s ease;
+
+min-width:420px;
+}
+
+#popupAlert.show{
+opacity:1;
+}
+
+#popupAlert.show{
+opacity:1;
+}
+
+.popup-title{
+font-size:1.8em;
+font-weight:bold;
+margin-bottom:4px;
+}
+
+.popup-area{
+font-size:1.2em;
+margin-bottom:4px;
+}
+
+.popup-expire{
+font-size:1em;
+opacity:.9;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>Active Alerts</h2>
+
+<button onclick="testTORE()">🔊 Test TORE</button>
+<button onclick="testTOR()">🔊 Test TOR</button>
+<button onclick="testSVR()">🔊 Test SVR</button>
+<button onclick="testBelow()">🔊 Test Below SVR</button>
+
+<div id="alerts">Loading...</div>
+
+<div id="popupAlert">
+<div class="popup-title" id="popupTitle"></div>
+<div class="popup-area" id="popupArea"></div>
+<div class="popup-expire" id="popupExpire"></div>
+</div>
+
+<script>
+
+const REFRESH_INTERVAL=7000;
+
+const PRIORITY=[
+"TORE","TORP","TORR","TOR",
+"SVRD","SVRC","SVR",
+"FFWE","FFWC","FFW",
+"SMW","SQW"
+];
+
+const audioFiles={
+TORE:new Audio("TORE.mp3"),
+TOR:new Audio("TOR.mp3"),
+SVR:new Audio("SVR.mp3"),
+BELOW:new Audio("BELOWSVR.mp3")
+};
+
+Object.values(audioFiles).forEach(a=>{
+a.preload="auto";
+a.volume=1;
+});
+
+let speechQueue=[];
+let speaking=false;
+
+function queueSpeech(text,priority,audioType){
+
+speechQueue.push({text,priority,audioType});
+
+speechQueue.sort((a,b)=>b.priority-a.priority);
+
+processQueue();
+}
+
+async function processQueue(){
+
+if(speaking) return;
+if(speechQueue.length===0) return;
+
+speaking=true;
+
+const alert=speechQueue.shift();
+
+if(alert.audioType==="TORE"){
+await playAudio(audioFiles.TORE);
+}
+else if(alert.audioType==="TOR"){
+await playAudio(audioFiles.TOR);
+}
+else if(alert.audioType==="SVR"){
+await playAudio(audioFiles.SVR);
+}
+else{
+await playAudio(audioFiles.BELOW);
+}
+
+await speak(alert.text);
+
+speaking=false;
+
+processQueue();
+}
+
+function playAudio(audio){
+
+return new Promise(resolve=>{
+
+audio.pause();
+audio.currentTime=0;
+
+audio.onended=()=>resolve();
+
+audio.play().catch(()=>resolve());
+
+});
+}
+
+function speak(text){
+
+return new Promise(resolve=>{
+
+const msg=new SpeechSynthesisUtterance(text);
+
+msg.rate=1;
+msg.pitch=1;
+
+msg.onend=resolve;
+
+speechSynthesis.speak(msg);
+
+});
+}
+
+let spokenAlerts=new Map();
+
+function classify(props){
+
+const event=props.event||"";
+const headline=props.headline||"";
+const damage=props.parameters?.damageThreat?.[0]||"";
+const floodDamage=props.parameters?.flashFloodDamageThreat?.[0]||"";
+
+if(event==="Tornado Warning"){
+
+const torThreat=props.parameters?.tornadoDamageThreat?.[0]||"";
+const lowerHeadline=headline.toLowerCase();
+
+if(lowerHeadline.includes("emergency")) return"TORE";
+
+if(torThreat==="CONSIDERABLE"||lowerHeadline.includes("particularly dangerous situation"))
+return"TORP";
+
+if(lowerHeadline.includes("observed")||lowerHeadline.includes("radar confirmed"))
+return"TORR";
+
+return"TOR";
+}
+
+if(event==="Severe Thunderstorm Warning"){
+
+if(damage==="DESTRUCTIVE") return"SVRD";
+if(damage==="CONSIDERABLE") return"SVRC";
+
+return"SVR";
+}
+
+if(event==="Flash Flood Warning"){
+
+if(headline.includes("Emergency")) return"FFWE";
+if(floodDamage==="CONSIDERABLE") return"FFWC";
+
+return"FFW";
+}
+
+if(event==="Special Marine Warning") return"SMW";
+if(event==="Snow Squall Warning") return"SQW";
+
+return null;
+}
+
+function formatAreas(areaDesc){
+
+return areaDesc
+.split(";")
+.map(a=>a.trim())
+.join(" | ");
+
+}
+
+function formatUTC(dateString){
+
+if(!dateString) return"N/A";
+
+const d=new Date(dateString);
+
+return d.toISOString().substring(11,16)+"Z";
+}
+
+/* POPUP */
+
+function showPopup(event,areas,expires,code){
+
+const popup=document.getElementById("popupAlert");
+
+document.getElementById("popupTitle").textContent=event;
+document.getElementById("popupArea").textContent=areas;
+document.getElementById("popupExpire").textContent="Valid Until "+expires+"";
+
+document.getElementById("popupTitle").style.color=
+getComputedStyle(document.documentElement)
+.getPropertyValue("--"+code);
+
+popup.classList.add("show");
+
+setTimeout(()=>{
+popup.classList.remove("show");
+},10000);
+
+}
+
+async function fetchAlerts(){
+
+try{
+
+const response=await fetch("https://api.weather.gov/alerts/active",{
+headers:{
+"User-Agent":"priority-weather-dashboard",
+"Accept":"application/geo+json"
+}
+});
+
+const data=await response.json();
+
+const container=document.getElementById("alerts");
+
+const filtered=[];
+
+for(const alert of data.features){
+
+const props=alert.properties;
+
+const code=classify(props);
+
+if(!code) continue;
+
+const expires=formatUTC(props.expires);
+
+const areas=formatAreas(props.areaDesc);
+
+filtered.push({
+code,
+area:areas,
+expires
+});
+
+const alertID=alert.id;
+const sent=props.sent;
+
+const prev=spokenAlerts.get(alertID);
+
+let speechType="new";
+
+if(prev){
+
+if(prev!==sent){
+speechType="update";
+}else{
+continue;
+}
+
+}
+
+spokenAlerts.set(alertID,sent);
+
+const priorityLevel=PRIORITY.indexOf(code);
+const speechPriority=PRIORITY.length-priorityLevel;
+
+let audioType="BELOW";
+
+if(code==="TORE") audioType="TORE";
+else if(code.startsWith("TOR")) audioType="TOR";
+else if(code.startsWith("SVR")) audioType="SVR";
+
+let speechText="";
+
+if(speechType==="update"){
+
+speechText=`Updated ${props.event} for ${areas}. Expires at ${expires} Zulu.`;
+
+}else{
+
+speechText=`${props.event} for ${areas}. Expires at ${expires} Zulu.`;
+
+showPopup(props.event,areas,expires,code);
+
+}
+
+queueSpeech(speechText,speechPriority,audioType);
+
+}
+
+filtered.sort((a,b)=>PRIORITY.indexOf(a.code)-PRIORITY.indexOf(b.code));
+
+if(filtered.length===0){
+
+container.innerHTML="No warnings active.";
+
+return;
+
+}
+
+container.innerHTML=filtered.map(alert=>{
+
+let outlineClass="outline-normal";
+
+if(alert.code==="TORE") outlineClass="outline-huge";
+else if(alert.code==="TORP") outlineClass="outline-large";
+else if(alert.code==="TORR") outlineClass="outline-medium";
+else if(alert.code==="SVRD"||alert.code==="FFWE") outlineClass="outline-large";
+else if(alert.code==="SVRC"||alert.code==="FFWC") outlineClass="outline-medium";
+
+return`
+<div class="alert-line ${outlineClass}" style="color:var(--${alert.code})">
+${alert.code} | ${alert.area} | Expires: ${alert.expires}
+</div>
+`;
+
+}).join("");
+
+}catch(err){
+
+document.getElementById("alerts").innerHTML="Error loading alerts.";
+
+console.error(err);
+
+}
+
+}
+
+function testTORE(){
+
+queueSpeech(
+"Tornado Emergency for Test County. Seek shelter immediately.",
+100,
+"TORE"
+);
+
+showPopup("Tornado Emergency","Test County","12:00Z","TORE");
+
+}
+
+function testTOR(){
+
+queueSpeech(
+"Tornado Warning for Test County.",
+90,
+"TOR"
+);
+
+showPopup("Tornado Warning","Test County","12:00Z","TOR");
+
+}
+
+function testSVR(){
+
+queueSpeech(
+"Severe Thunderstorm Warning for Test County.",
+80,
+"SVR"
+);
+
+showPopup("Severe Thunderstorm Warning","Test County","12:00Z","SVR");
+
+}
+
+function testBelow(){
+
+queueSpeech(
+"Flash Flood Warning for Test County.",
+70,
+"BELOW"
+);
+
+showPopup("Flash Flood Warning","Test County","12:00Z","FFW");
+
+}
+
+fetchAlerts();
+
+setInterval(fetchAlerts,REFRESH_INTERVAL);
+
+</script>
+
+</body>
+</html>
