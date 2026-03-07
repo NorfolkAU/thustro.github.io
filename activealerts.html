@@ -49,8 +49,8 @@ button {
     --SVR:#ffff00;
 
     --FFWE:#00ff00;
-    --FFWC:#00cc66;
-    --FFW:#0099ff;
+    --FFWC:#00ff00;
+    --FFW:#00ff00;
 
     --SMW:#008080;
     --SQW:#89cff0;
@@ -137,6 +137,22 @@ const PRIORITY=[
 "SMW","SQW"
 ];
 
+const STATE_NAMES = {
+AL:"Alabama", AK:"Alaska", AZ:"Arizona", AR:"Arkansas",
+CA:"California", CO:"Colorado", CT:"Connecticut", DE:"Delaware",
+FL:"Florida", GA:"Georgia", HI:"Hawaii", ID:"Idaho",
+IL:"Illinois", IN:"Indiana", IA:"Iowa", KS:"Kansas",
+KY:"Kentucky", LA:"Louisiana", ME:"Maine", MD:"Maryland",
+MA:"Massachusetts", MI:"Michigan", MN:"Minnesota", MS:"Mississippi",
+MO:"Missouri", MT:"Montana", NE:"Nebraska", NV:"Nevada",
+NH:"New Hampshire", NJ:"New Jersey", NM:"New Mexico", NY:"New York",
+NC:"North Carolina", ND:"North Dakota", OH:"Ohio", OK:"Oklahoma",
+OR:"Oregon", PA:"Pennsylvania", RI:"Rhode Island", SC:"South Carolina",
+SD:"South Dakota", TN:"Tennessee", TX:"Texas", UT:"Utah",
+VT:"Vermont", VA:"Virginia", WA:"Washington", WV:"West Virginia",
+WI:"Wisconsin", WY:"Wyoming", DC:"District of Columbia"
+};
+
 const audioFiles={
 TORE:new Audio("TORE.mp3"),
 TOR:new Audio("TOR.mp3"),
@@ -151,7 +167,6 @@ a.volume=1;
 
 let speechQueue=[];
 let speaking=false;
-
 function queueSpeech(text,priority,audioType){
 
 speechQueue.push({text,priority,audioType});
@@ -226,31 +241,58 @@ function classify(props){
 
 const event=props.event||"";
 const headline=props.headline||"";
-const damage=props.parameters?.damageThreat?.[0]||"";
+const damage=props.parameters?.thunderstormDamageThreat?.[0]||"";
 const floodDamage=props.parameters?.flashFloodDamageThreat?.[0]||"";
 
 if(event==="Tornado Warning"){
 
-const torThreat=props.parameters?.tornadoDamageThreat?.[0]||"";
-const lowerHeadline=headline.toLowerCase();
+const detection = props.parameters?.tornadoDetection?.[0] || "";
+const torThreat = props.parameters?.tornadoDamageThreat?.[0] || "";
+const lowerHeadline = headline.toLowerCase();
+const lowerDesc = (props.description || "").toLowerCase();
 
-if(lowerHeadline.includes("emergency")) return"TORE";
+if(lowerHeadline.includes("emergency"))
+return "TORE";
 
-if(torThreat==="CONSIDERABLE"||lowerHeadline.includes("particularly dangerous situation"))
-return"TORP";
+if(torThreat === "CONSIDERABLE" || lowerHeadline.includes("particularly dangerous situation"))
+return "TORP";
 
-if(lowerHeadline.includes("observed")||lowerHeadline.includes("radar confirmed"))
-return"TORR";
+/* OBSERVED TORNADO DETECTION */
+if(
+detection === "Observed" ||
+lowerHeadline.includes("observed") ||
+lowerDesc.includes("observed") ||
+lowerDesc.includes("confirmed tornado") ||
+lowerDesc.includes("radar confirmed tornado")
+)
+return "TORR";
 
-return"TOR";
+return "TOR";
 }
 
 if(event==="Severe Thunderstorm Warning"){
 
-if(damage==="DESTRUCTIVE") return"SVRD";
-if(damage==="CONSIDERABLE") return"SVRC";
+const damage=props.parameters?.thunderstormDamageThreat?.[0]||"";
+const lowerHeadline = (props.headline || "").toLowerCase();
+const lowerDesc = (props.description || "").toLowerCase();
 
-return"SVR";
+/* DESTRUCTIVE */
+if(
+damage === "DESTRUCTIVE" ||
+lowerHeadline.includes("destructive") ||
+lowerDesc.includes("destructive damage threat")
+)
+return "SVRD";
+
+/* CONSIDERABLE */
+if(
+damage === "CONSIDERABLE" ||
+lowerHeadline.includes("considerable") ||
+lowerDesc.includes("considerable damage threat")
+)
+return "SVRC";
+
+return "SVR";
 }
 
 if(event==="Flash Flood Warning"){
@@ -271,7 +313,25 @@ function formatAreas(areaDesc){
 
 return areaDesc
 .split(";")
-.map(a=>a.trim())
+.map(a=>{
+a=a.trim();
+
+const parts=a.split(",");
+
+if(parts.length===2){
+
+const county=parts[0].trim();
+const state=parts[1].trim();
+
+if(STATE_NAMES[state]){
+return county + ", " + STATE_NAMES[state];
+}
+
+}
+
+return a;
+
+})
 .join(" | ");
 
 }
@@ -287,13 +347,28 @@ return d.toISOString().substring(11,16)+"Z";
 
 /* POPUP */
 
-function showPopup(event,areas,expires,code){
+function showPopup(event,areas,expires,code,isUpdate=false){
 
 const popup=document.getElementById("popupAlert");
 
-document.getElementById("popupTitle").textContent=event;
+let title = code + " - " + event;
+
+if(isUpdate){
+
+let updateType="Update";
+
+if(code==="TORR") updateType="Update (Reported)";
+else if(code==="TORP") updateType="Update (PDS)";
+else if(code==="SVRD") updateType="Update (Destructive)";
+else if(code==="SVRC") updateType="Update (Considerable)";
+
+title = event + " - " + updateType;
+
+}
+
+document.getElementById("popupTitle").textContent=title;
 document.getElementById("popupArea").textContent=areas;
-document.getElementById("popupExpire").textContent="Valid Until "+expires+"";
+document.getElementById("popupExpire").textContent="Valid Until "+expires;
 
 document.getElementById("popupTitle").style.color=
 getComputedStyle(document.documentElement)
@@ -376,6 +451,8 @@ if(speechType==="update"){
 
 speechText=`Updated ${props.event} for ${areas}. Expires at ${expires} Zulu.`;
 
+showPopup(props.event,areas,expires,code,true);
+
 }else{
 
 speechText=`${props.event} for ${areas}. Expires at ${expires} Zulu.`;
@@ -393,6 +470,8 @@ filtered.sort((a,b)=>PRIORITY.indexOf(a.code)-PRIORITY.indexOf(b.code));
 if(filtered.length===0){
 
 container.innerHTML="No warnings active.";
+
+initialLoad = false;
 
 return;
 
